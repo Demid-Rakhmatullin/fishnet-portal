@@ -22,7 +22,7 @@ namespace FishNet.Upgrading.Mirror.Editing
         /// <summary>
         /// Replaces all components.
         /// </summary>
-        [MenuItem("Fish-Networking/Upgrading/From Mirror/Replace Components", false, 2)]
+        [MenuItem("Tools/Fish-Networking/Utility/Upgrading/From Mirror/Replace Components", false, 1)]
         private static void ReplaceComponents()
         {
 #if MIRROR
@@ -40,14 +40,14 @@ namespace FishNet.Upgrading.Mirror.Editing
 #endif
         }
 
-        [MenuItem("Fish-Networking/Upgrading/From Mirror/Remove Defines", false, 2)]
+        [MenuItem("Tools/Fish-Networking/Utility/Upgrading/From Mirror/Remove Defines", false, 2)]
         private static void RemoveDefines()
         {
             string currentDefines = PlayerSettings.GetScriptingDefineSymbolsForGroup(EditorUserBuildSettings.selectedBuildTargetGroup);
             /* Convert current defines into a hashset. This is so we can
              * determine if any of our defines were added. Only save playersettings
              * when a define is added. */
-            HashSet<string> definesHs = new HashSet<string>();
+            HashSet<string> definesHs = new();
             string[] currentArr = currentDefines.Split(';');
 
             bool removed = false;

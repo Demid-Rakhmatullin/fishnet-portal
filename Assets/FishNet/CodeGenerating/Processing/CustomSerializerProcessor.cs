@@ -37,7 +37,7 @@ namespace FishNet.CodeGenerating.Processing
                 ExtensionType extensionType = GetExtensionType(methodDef);
                 if (extensionType == ExtensionType.None)
                     continue;
-                if (base.GetClass<GeneralHelper>().CodegenExclude(methodDef))
+                if (base.GetClass<GeneralHelper>().HasNotSerializableAttribute(methodDef))
                     continue;
 
                 MethodReference methodRef = base.ImportReference(methodDef);
@@ -65,7 +65,7 @@ namespace FishNet.CodeGenerating.Processing
         {
             bool modified = false;
 
-            List<(MethodDefinition, ExtensionType)> declaredMethods = new List<(MethodDefinition, ExtensionType)>();
+            List<(MethodDefinition, ExtensionType)> declaredMethods = new();
             /* Go through all custom serializers again and see if 
              * they use any types that the user didn't make a serializer for
              * and that there isn't a built-in type for. Create serializers
@@ -75,7 +75,7 @@ namespace FishNet.CodeGenerating.Processing
                 ExtensionType extensionType = GetExtensionType(methodDef);
                 if (extensionType == ExtensionType.None)
                     continue;
-                if (base.GetClass<GeneralHelper>().CodegenExclude(methodDef))
+                if (base.GetClass<GeneralHelper>().HasNotSerializableAttribute(methodDef))
                     continue;
 
                 declaredMethods.Add((methodDef, extensionType));
@@ -116,7 +116,7 @@ namespace FishNet.CodeGenerating.Processing
              * isn't made for a type when the user has already made a declared one. */
             foreach (MethodDefinition methodDef in typeDef.Methods)
             {
-                if (gh.CodegenExclude(methodDef))
+                if (gh.HasNotSerializableAttribute(methodDef))
                     continue;
                 if (!methodDef.HasCustomAttribute<CustomComparerAttribute>())
                     continue;
@@ -225,6 +225,12 @@ namespace FishNet.CodeGenerating.Processing
         /// </summary>
         private void CreateReaderOrWriter(ExtensionType extensionType, MethodDefinition methodDef, ref int instructionIndex, TypeReference parameterType)
         {
+            ReaderProcessor rp = base.GetClass<ReaderProcessor>();
+            WriterProcessor wp = base.GetClass<WriterProcessor>();
+            ////If parameterType has user declared do nothing.
+            //if (wp.IsGlobalSerializer(parameterType))
+            //    return;
+
             if (!parameterType.IsGenericParameter && parameterType.CanBeResolved(base.Session))
             {
                 TypeDefinition typeDefinition = parameterType.CachedResolve(base.Session);
@@ -244,61 +250,35 @@ namespace FishNet.CodeGenerating.Processing
 
                 //Find already existing read or write method.
                 MethodReference createdMethodRef = (extensionType == ExtensionType.Write) ?
-                    base.GetClass<WriterProcessor>().GetWriteMethodReference(parameterType) :
-                    base.GetClass<ReaderProcessor>().GetReadMethodReference(parameterType);
+                    wp.GetWriteMethodReference(parameterType) :
+                    rp.GetReadMethodReference(parameterType);
 
                 //If a created method already exist nothing further is required.
                 if (createdMethodRef != null)
                 {
-                    TryInsertAutoPack(ref instructionIndex);
                     //Replace call to generic with already made serializer.
                     Instruction newInstruction = processor.Create(OpCodes.Call, createdMethodRef);
-                    methodDef.Body.Instructions[instructionIndex] = newInstruction;                    
+                    methodDef.Body.Instructions[instructionIndex] = newInstruction;
                     return;
                 }
                 else
                 {
                     createdMethodRef = (extensionType == ExtensionType.Write) ?
-                        base.GetClass<WriterProcessor>().CreateWriter(parameterType) :
-                        base.GetClass<ReaderProcessor>().CreateReader(parameterType);
+                        wp.CreateWriter(parameterType) :
+                        rp.CreateReader(parameterType);
                 }
 
                 //If method was created.
                 if (createdMethodRef != null)
                 {
-                    TryInsertAutoPack(ref instructionIndex);
                     //Set new instruction.
                     Instruction newInstruction = processor.Create(OpCodes.Call, createdMethodRef);
                     methodDef.Body.Instructions[instructionIndex] = newInstruction;
                 }
             }
 
-            void TryInsertAutoPack(ref int insertIndex)
-            {
-                if (IsAutoPackMethod(parameterType, extensionType))
-                {
-                    ILProcessor processor = methodDef.Body.GetILProcessor();
-                    AutoPackType packType = base.GetClass<GeneralHelper>().GetDefaultAutoPackType(parameterType);
-                    Instruction autoPack = processor.Create(OpCodes.Ldc_I4, (int)packType);
-                    methodDef.Body.Instructions.Insert(insertIndex, autoPack);
-                    insertIndex++;
-                }
-            }
         }
 
-        /// <summary>
-        /// Returns if a typeRef serializer requires or uses autopacktype.
-        /// </summary>
-        private bool IsAutoPackMethod(TypeReference typeRef, ExtensionType extensionType)
-        {
-            if (extensionType == ExtensionType.Write)
-                return base.GetClass<WriterProcessor>().IsAutoPackedType(typeRef);
-            else if (extensionType == ExtensionType.Read)
-                return base.GetClass<ReaderProcessor>().IsAutoPackedType(typeRef);
-            else
-                return false;
-
-        }
         /// <summary>
         /// Returns the RPC attribute on a method, if one exist. Otherwise returns null.
         /// </summary>
@@ -327,7 +307,7 @@ namespace FishNet.CodeGenerating.Processing
 #endif
 
 
-            string prefix = (write) ? WriterProcessor.WRITE_PREFIX : ReaderProcessor.READ_PREFIX;
+            string prefix = (write) ? WriterProcessor.CUSTOM_WRITER_PREFIX : ReaderProcessor.CUSTOM_READER_PREFIX;
 
             //Does not contain prefix.
             if (methodDef.Name.Length < prefix.Length || methodDef.Name.Substring(0, prefix.Length) != prefix)

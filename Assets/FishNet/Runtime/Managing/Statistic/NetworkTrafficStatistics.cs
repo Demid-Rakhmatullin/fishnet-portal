@@ -102,7 +102,7 @@ namespace FishNet.Managing.Statistic
         /// <summary>
         /// Size suffixes as text.
         /// </summary>
-        private static readonly string[] _sizeSuffixes = { "bytes", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB" };
+        private static readonly string[] _sizeSuffixes = { "B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB" };
         #endregion
 
         internal void InitializeOnce_Internal(NetworkManager manager)
@@ -120,10 +120,10 @@ namespace FishNet.Managing.Statistic
                 return;
             _nextUpdateTime = Time.unscaledTime + _updateInteval;
 
-            if (UpdateClient && _networkManager.IsClient)
-                OnClientNetworkTraffic?.Invoke(new NetworkTrafficArgs(_client_toServerBytes, _client_fromServerBytes));
-            if (UpdateServer && _networkManager.IsServer)
-                OnServerNetworkTraffic?.Invoke(new NetworkTrafficArgs(_server_fromClientsBytes, _server_toClientsBytes));
+            if (UpdateClient && _networkManager.IsClientStarted)
+                OnClientNetworkTraffic?.Invoke(new(_client_toServerBytes, _client_fromServerBytes));
+            if (UpdateServer && _networkManager.IsServerStarted)
+                OnServerNetworkTraffic?.Invoke(new(_server_fromClientsBytes, _server_toClientsBytes));
 
             _client_toServerBytes = 0;
             _client_fromServerBytes = 0;
@@ -173,7 +173,7 @@ namespace FishNet.Managing.Statistic
             if (bytes == 0)
             {
                 decimalPlaces = 0;
-                return string.Format("{0:n" + decimalPlaces + "} bytes", 0);
+                return string.Format("{0:n" + decimalPlaces + "} B/s", 0);
             }
 
             // mag is 0 for bytes, 1 for KB, 2, for MB, etc.

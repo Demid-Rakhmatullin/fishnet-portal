@@ -12,9 +12,9 @@ namespace FishNet.Managing.Scened
     public class SceneLoadData
     {
         /// <summary>
-        /// When specified this scene will be set as the active scene after loading occurs.
+        /// When specified these scenes will be set as the active scene after loading occurs.
         /// </summary>
-        public SceneLookupData PreferredActiveScene = null;
+        public PreferredScene PreferredActiveScene;
         /// <summary>
         /// SceneLookupData for each scene to load.
         /// </summary>
@@ -30,11 +30,11 @@ namespace FishNet.Managing.Scened
         /// <summary>
         /// Parameters which may be set and will be included in load callbacks.
         /// </summary>
-        public LoadParams Params = new LoadParams();
+        public LoadParams Params = new();
         /// <summary>
         /// Additional options to use for loaded scenes.
         /// </summary>
-        public LoadOptions Options = new LoadOptions();
+        public LoadOptions Options = new();
 
         public SceneLoadData() { }
         /// <summary>

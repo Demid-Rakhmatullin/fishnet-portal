@@ -3,6 +3,7 @@ using FishNet.Managing.Transporting;
 using LiteNetLib.Layers;
 using System;
 using System.Runtime.CompilerServices;
+using LiteNetLib;
 using UnityEngine;
 
 namespace FishNet.Transporting.Tugboat
@@ -17,22 +18,36 @@ namespace FishNet.Transporting.Tugboat
         }
 
         #region Serialized.
-        [Header("Channels")]
+        /* Settings / Misc. */
+        /// <summary>
+        /// While true, forces sockets to send data directly to interface without routing.
+        /// </summary>
+        [Tooltip("While true, forces sockets to send data directly to interface without routing.")]
+        [SerializeField]
+        private bool _dontRoute;
+
+        /* Channels. */
         /// <summary>
         /// Maximum transmission unit for the unreliable channel.
         /// </summary>
         [Tooltip("Maximum transmission unit for the unreliable channel.")]
         [Range(MINIMUM_UDP_MTU, MAXIMUM_UDP_MTU)]
         [SerializeField]
-        private int _unreliableMTU = 1023;
+        private int _unreliableMtu = 1023;
 
-        [Header("Server")]
+        /* Server. */
         /// <summary>
         /// IPv4 address to bind server to.
         /// </summary>
         [Tooltip("IPv4 Address to bind server to.")]
         [SerializeField]
         private string _ipv4BindAddress;
+        /// <summary>
+        /// Enable IPv6 only on demand to avoid problems in Linux environments where it may have been disabled on host
+        /// </summary>
+        [Tooltip("Enable IPv6, Server listens on IPv4 and IPv6 address")]
+        [SerializeField]
+        private bool _enableIpv6 = true;
         /// <summary>
         /// IPv6 address to bind server to.
         /// </summary>
@@ -53,23 +68,13 @@ namespace FishNet.Transporting.Tugboat
         [SerializeField]
         private int _maximumClients = 4095;
 
-
-        [Header("Client")]
+        /* Client. */
         /// <summary>
         /// Address to connect.
         /// </summary>
         [Tooltip("Address to connect.")]
         [SerializeField]
         private string _clientAddress = "localhost";
-
-        [Header("Misc")]
-        /// <summary>
-        /// How long in seconds until either the server or client socket must go without data before being timed out. Use 0f to disable timing out.
-        /// </summary>
-        [Tooltip("How long in seconds until either the server or client socket must go without data before being timed out. Use 0f to disable timing out.")]
-        [Range(0, MAX_TIMEOUT_SECONDS)]
-        [SerializeField]
-        private ushort _timeout = 15;
         #endregion
 
         #region Private.
@@ -80,14 +85,25 @@ namespace FishNet.Transporting.Tugboat
         /// <summary>
         /// Server socket and handler.
         /// </summary>
-        private Server.ServerSocket _server = new Server.ServerSocket();
+        private Server.ServerSocket _server = new();
         /// <summary>
         /// Client socket and handler.
         /// </summary>
-        private Client.ClientSocket _client = new Client.ClientSocket();
+        private Client.ClientSocket _client = new();
+        /// <summary>
+        /// Current timeout for the client.
+        /// </summary>
+        private int _clientTimeout = MAX_TIMEOUT_SECONDS;
+        /// <summary>
+        /// Current timeout for the server.
+        /// </summary>
+        private int _serverTimeout = MAX_TIMEOUT_SECONDS;
         #endregion
 
         #region Const.
+        /// <summary>
+        /// Maximum timeout value to use.
+        /// </summary>
         private const ushort MAX_TIMEOUT_SECONDS = 1800;
         /// <summary>
         /// Minimum UDP packet size allowed.
@@ -170,7 +186,6 @@ namespace FishNet.Transporting.Tugboat
         public override void HandleServerConnectionState(ServerConnectionStateArgs connectionStateArgs)
         {
             OnServerConnectionState?.Invoke(connectionStateArgs);
-            UpdateTimeout();
         }
         /// <summary>
         /// Handles a ConnectionStateArgs for a remote client.
@@ -216,8 +231,34 @@ namespace FishNet.Transporting.Tugboat
                 _client.IterateOutgoing();
         }
         #endregion
-
-        #region ReceivedData.
+        
+        #region Sending.
+        /// <summary>
+        /// Sends to the server or all clients.
+        /// </summary>
+        /// <param name="channelId">Channel to use.</param>
+        /// <param name="segment">Data to send.</param>
+        
+        public override void SendToServer(byte channelId, ArraySegment<byte> segment)
+        {
+            SanitizeChannel(ref channelId);
+            _client.SendToServer(channelId, segment);
+        }
+        /// <summary>
+        /// Sends data to a client.
+        /// </summary>
+        /// <param name="channelId"></param>
+        /// <param name="segment"></param>
+        /// <param name="connectionId"></param>
+        
+        public override void SendToClient(byte channelId, ArraySegment<byte> segment, int connectionId)
+        {
+            SanitizeChannel(ref channelId);
+            _server.SendToClient(channelId, segment, connectionId);
+        }
+        #endregion
+        
+        #region Receiving.
         /// <summary>
         /// Called when client receives data.
         /// </summary>
@@ -242,31 +283,25 @@ namespace FishNet.Transporting.Tugboat
         {
             OnServerReceivedData?.Invoke(receivedDataArgs);
         }
-        #endregion
 
-        #region Sending.
         /// <summary>
-        /// Sends to the server or all clients.
+        /// Returns packet loss percentage. This transport supports this feature.
         /// </summary>
-        /// <param name="channelId">Channel to use.</param>
-        /// <param name="segment">Data to send.</param>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public override void SendToServer(byte channelId, ArraySegment<byte> segment)
+        /// <param name="asServer">True to return packet loss on the server, false to return packet loss on the client.</param>
+        public override float GetPacketLoss(bool asServer)
         {
-            SanitizeChannel(ref channelId);
-            _client.SendToServer(channelId, segment);
-        }
-        /// <summary>
-        /// Sends data to a client.
-        /// </summary>
-        /// <param name="channelId"></param>
-        /// <param name="segment"></param>
-        /// <param name="connectionId"></param>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public override void SendToClient(byte channelId, ArraySegment<byte> segment, int connectionId)
-        {
-            SanitizeChannel(ref channelId);
-            _server.SendToClient(channelId, segment, connectionId);
+            NetManager nm;
+            if (asServer && _server != null)
+                nm = _server.NetManager;
+            else if (!asServer && _client != null)
+                nm = _client.NetManager;
+            else
+                nm = null;
+
+            if (nm == null)
+                return 0f;
+
+            return nm.Statistics.PacketLossPercent;
         }
         #endregion
 
@@ -283,8 +318,8 @@ namespace FishNet.Transporting.Tugboat
             if (GetConnectionState(false) != LocalConnectionState.Stopped)
                 base.NetworkManager.LogWarning("PacketLayer is set but will not be applied until the client stops.");
 
-            _server.Initialize(this, _unreliableMTU, _packetLayer);
-            _client.Initialize(this, _unreliableMTU, _packetLayer);
+            _server.Initialize(this, _unreliableMtu, _packetLayer, _enableIpv6, _dontRoute);
+            _client.Initialize(this, _unreliableMtu, _packetLayer, _dontRoute);
         }
         /// <summary>
         /// How long in seconds until either the server or client socket must go without data before being timed out.
@@ -294,7 +329,7 @@ namespace FishNet.Transporting.Tugboat
         public override float GetTimeout(bool asServer)
         {
             //Server and client uses the same timeout.
-            return (float)_timeout;
+            return (float)MAX_TIMEOUT_SECONDS;
         }
         /// <summary>
         /// Sets how long in seconds until either the server or client socket must go without data before being timed out.
@@ -302,7 +337,13 @@ namespace FishNet.Transporting.Tugboat
         /// <param name="asServer">True to set the timeout for the server socket, false for the client socket.</param>
         public override void SetTimeout(float value, bool asServer)
         {
-            _timeout = (ushort)value;
+            int timeoutValue = (int)Math.Ceiling(value);
+            if (asServer)
+                _serverTimeout = timeoutValue;
+            else
+                _clientTimeout = timeoutValue;
+
+            UpdateTimeout();
         }
         /// <summary>
         /// Returns the maximum number of clients allowed to connect to the server. If the transport does not support this method the value -1 is returned.
@@ -439,7 +480,7 @@ namespace FishNet.Transporting.Tugboat
         /// </summary>
         private bool StartServer()
         {
-            _server.Initialize(this, _unreliableMTU, _packetLayer);
+            _server.Initialize(this, _unreliableMtu, _packetLayer, _enableIpv6, _dontRoute);
             UpdateTimeout();
             return _server.StartConnection(_port, _maximumClients, _ipv4BindAddress, _ipv6BindAddress);
         }
@@ -461,7 +502,7 @@ namespace FishNet.Transporting.Tugboat
         /// <param name="address"></param>
         private bool StartClient(string address)
         {
-            _client.Initialize(this, _unreliableMTU, _packetLayer);
+            _client.Initialize(this, _unreliableMtu, _packetLayer, _dontRoute);
             UpdateTimeout();
             return _client.StartConnection(address, _port);
         }
@@ -471,11 +512,8 @@ namespace FishNet.Transporting.Tugboat
         /// </summary>
         private void UpdateTimeout()
         {
-            //If server is running set timeout to max. This is for host only.
-            //int timeout = (GetConnectionState(true) != LocalConnectionState.Stopped) ? MAX_TIMEOUT_SECONDS : _timeout;
-            int timeout = (Application.isEditor) ? MAX_TIMEOUT_SECONDS : _timeout;
-            _client.UpdateTimeout(timeout);
-            _server.UpdateTimeout(timeout);
+            _client.UpdateTimeout(_clientTimeout);
+            _server.UpdateTimeout(_serverTimeout);
         }
         /// <summary>
         /// Stops the client.
@@ -511,7 +549,7 @@ namespace FishNet.Transporting.Tugboat
         /// <returns></returns>
         public override int GetMTU(byte channel)
         {
-            return _unreliableMTU;
+            return _unreliableMtu;
         }
         #endregion
 
@@ -519,10 +557,10 @@ namespace FishNet.Transporting.Tugboat
 #if UNITY_EDITOR
         private void OnValidate()
         {
-            if (_unreliableMTU < 0)
-                _unreliableMTU = MINIMUM_UDP_MTU;
-            else if (_unreliableMTU > MAXIMUM_UDP_MTU)
-                _unreliableMTU = MAXIMUM_UDP_MTU;
+            if (_unreliableMtu < 0)
+                _unreliableMtu = MINIMUM_UDP_MTU;
+            else if (_unreliableMtu > MAXIMUM_UDP_MTU)
+                _unreliableMtu = MAXIMUM_UDP_MTU;
         }
 #endif
         #endregion

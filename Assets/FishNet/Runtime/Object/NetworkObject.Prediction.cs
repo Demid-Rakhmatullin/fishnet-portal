@@ -1,18 +1,21 @@
-﻿using FishNet.Component.Prediction;
+﻿#define NEW_RECONCILE_TEST
+using System;
+using FishNet.Component.Prediction;
+using FishNet.Component.Transforming;
 using FishNet.Managing;
 using FishNet.Managing.Timing;
 using FishNet.Object.Prediction;
+using GameKit.Dependencies.Utilities;
 using System.Collections.Generic;
+using FishNet.Connection;
+using FishNet.Managing.Server;
 using UnityEngine;
 
 namespace FishNet.Object
 {
-#if PREDICTION_V2
     public partial class NetworkObject : MonoBehaviour
     {
-
         #region Types.
-#if PREDICTION_V2
         /// <summary>
         /// Type of prediction movement being used.
         /// </summary>
@@ -23,225 +26,341 @@ namespace FishNet.Object
             Rigidbody = 1,
             Rigidbody2D = 2
         }
-#endif
         #endregion
 
         #region Public.
         /// <summary>
-        /// Last tick this object replicated.
+        /// True if a reconcile is occuring on any NetworkBehaviour that is on or nested of this NetworkObject. Runtime NetworkBehaviours are not included, such as if you child a NetworkObject to another at runtime.
         /// </summary>
-        internal EstimatedTick ReplicateTick;
+        public bool IsObjectReconciling { get; internal set; }
+
         /// <summary>
-        /// Last tick to replicate even if out of order. This could be from tick events or even replaying inputs.
-        /// </summary>
-        internal uint LastUnorderedReplicateTick;
+        /// Graphical smoother to use when using set for owner.
+        /// </summary> 
+        public ChildTransformTickSmoother PredictionSmoother { get; private set; }
         #endregion
 
         #region Internal.
         /// <summary>
-        /// Pauses rigidbodies for prediction.
+        /// Pauses and unpauses rigidbodies when they do not have data to reconcile to.
         /// </summary>
-        public RigidbodyPauser RigidbodyPauser { get; private set; }
+        public RigidbodyPauser RigidbodyPauser => _rigidbodyPauser;
+
+        private RigidbodyPauser _rigidbodyPauser;
+        #endregion
+
+        #region Serialized.
+        /// <summary>
+        /// True if this object uses prediciton methods.
+        /// </summary>
+        public bool EnablePrediction => _enablePrediction;
+
+        [Tooltip("True if this object uses prediction methods.")]
+        [SerializeField]
+        private bool _enablePrediction;
+        /// <summary>
+        /// What type of component is being used for prediction? If not using rigidbodies set to other.
+        /// </summary>
+        [Tooltip("What type of component is being used for prediction? If not using rigidbodies set to other.")]
+        [SerializeField]
+        private PredictionType _predictionType = PredictionType.Other;
+        /// <summary>
+        /// Object containing graphics when using prediction. This should be child of the predicted root.
+        /// </summary>
+        [Tooltip("Object containing graphics when using prediction. This should be child of the predicted root.")]
+        [SerializeField]
+        private Transform _graphicalObject;
+
+        /// <summary>
+        /// Gets the current graphical object for prediction.
+        /// </summary>
+        /// <returns></returns>
+        public Transform GetGraphicalObject() => _graphicalObject;
+
+        /// <summary>
+        /// Sets a new graphical object for prediction.
+        /// </summary>
+        /// <param name="t"></param>
+        public void SetGraphicalObject(Transform t)
+        {
+            _graphicalObject = t;
+            InitializeTickSmoother();
+        }
+
+        /// <summary>
+        /// True to detach and re-attach the graphical object at runtime when the client initializes/deinitializes the item.
+        /// This can resolve camera jitter or be helpful objects child of the graphical which do not handle reconiliation well, such as certain animation rigs.
+        /// Transform is detached after OnStartClient, and reattached before OnStopClient.
+        /// </summary>
+        [Tooltip("True to detach and re-attach the graphical object at runtime when the client initializes/deinitializes the item. This can resolve camera jitter or be helpful objects child of the graphical which do not handle reconiliation well, such as certain animation rigs. Transform is detached after OnStartClient, and reattached before OnStopClient.")]
+        [SerializeField]
+        private bool _detachGraphicalObject;
+
+        /// <summary>
+        /// True to forward replicate and reconcile states to all clients. This is ideal with games where you want all clients and server to run the same inputs. False to only use prediction on the owner, and synchronize to spectators using other means such as a NetworkTransform.
+        /// </summary>
+        public bool EnableStateForwarding => (_enablePrediction && _enableStateForwarding);
+
+        [Tooltip("True to forward replicate and reconcile states to all clients. This is ideal with games where you want all clients and server to run the same inputs. False to only use prediction on the owner, and synchronize to spectators using other means such as a NetworkTransform.")]
+        [SerializeField]
+        private bool _enableStateForwarding = true;
+        /// <summary>
+        /// NetworkTransform to configure for prediction. Specifying this is optional.
+        /// </summary>
+        [Tooltip("NetworkTransform to configure for prediction. Specifying this is optional.")]
+        [SerializeField]
+        private NetworkTransform _networkTransform;
+        /// <summary>
+        /// How many ticks to interpolate graphics on objects owned by the client. Typically low as 1 can be used to smooth over the frames between ticks.
+        /// </summary>
+        [Tooltip("How many ticks to interpolate graphics on objects owned by the client. Typically low as 1 can be used to smooth over the frames between ticks.")]
+        [Range(1, byte.MaxValue)]
+        [SerializeField]
+        private byte _ownerInterpolation = 1;
+        /// <summary>
+        /// Properties of the graphicalObject to smooth when owned.
+        /// </summary>
+        [SerializeField]
+        private TransformPropertiesFlag _ownerSmoothedProperties = (TransformPropertiesFlag)~(-1 << 8);
+        /// <summary>
+        /// Interpolation amount of adaptive interpolation to use on non-owned objects. Higher levels result in more interpolation. When off spectatorInterpolation is used; when on interpolation based on strength and local client latency is used.
+        /// </summary>
+        [Tooltip("Interpolation amount of adaptive interpolation to use on non-owned objects. Higher levels result in more interpolation. When off spectatorInterpolation is used; when on interpolation based on strength and local client latency is used.")]
+        [SerializeField]
+        private AdaptiveInterpolationType _adaptiveInterpolation = AdaptiveInterpolationType.Low;
+        /// <summary>
+        /// Properties of the graphicalObject to smooth when the object is spectated.
+        /// </summary>
+        [SerializeField]
+        private TransformPropertiesFlag _spectatorSmoothedProperties = (TransformPropertiesFlag)~(-1 << 8);
+        /// <summary>
+        /// How many ticks to interpolate graphics on objects when not owned by the client.
+        /// </summary>
+        [Tooltip("How many ticks to interpolate graphics on objects when not owned by the client.")]
+        [Range(1, byte.MaxValue)]
+        [SerializeField]
+        private byte _spectatorInterpolation = 2;
+        /// <summary>
+        /// True to enable teleport threshhold.
+        /// </summary>
+        [Tooltip("True to enable teleport threshhold.")]
+        [SerializeField]
+        private bool _enableTeleport;
+        /// <summary>
+        /// Distance the graphical object must move between ticks to teleport the transform properties.
+        /// </summary>
+        [Tooltip("Distance the graphical object must move between ticks to teleport the transform properties.")]
+        [Range(0.001f, ushort.MaxValue)]
+        [SerializeField]
+        private float _teleportThreshold = 1f;
         #endregion
 
         #region Private.
-        #region Preset SmoothingDatas.
-        [System.NonSerialized]
-        private static AdaptiveInterpolationSmoothingData _accurateSmoothingData = new AdaptiveInterpolationSmoothingData()
-        {
-            NormalPercent = 0.625f,
-            CollisionPercent = 0.0625f,
-            NormalStep = 0.25f,
-            CollisionStep = 1f,
-        };
-        [System.NonSerialized]
-        private static AdaptiveInterpolationSmoothingData _mixedSmoothingData = new AdaptiveInterpolationSmoothingData()
-        {
-            NormalPercent = 1.25f,
-            CollisionPercent = 0.125f,
-            NormalStep = 0.25f,
-            CollisionStep = 0.75f,
-        };
-        [System.NonSerialized]
-        private static AdaptiveInterpolationSmoothingData _gradualSmoothingData = new AdaptiveInterpolationSmoothingData()
-        {
-            NormalPercent = 1.875f,
-            CollisionPercent = 0.25f,
-            NormalStep = 0.25f,
-            CollisionStep = 0.5f,
-        };
-        #endregion
-        /// <summary>
-        /// Graphical smoother to use when using set for owner.
-        /// </summary>
-        private SetInterpolationSmoother _ownerSetInterpolationSmoother;
-        /// <summary>
-        /// Graphical smoother to use when using set for spectators.
-        /// </summary>
-        private SetInterpolationSmoother _spectatorSetInterpolationSmoother;
-        /// <summary>
-        /// Graphical smoother to use when using adaptive.
-        /// </summary>
-        private AdaptiveInterpolationSmoother _spectatorAdaptiveInterpolationSmoother;
         /// <summary>
         /// NetworkBehaviours which use prediction.
         /// </summary>
-        private List<NetworkBehaviour> _predictionBehaviours = new List<NetworkBehaviour>();
-        /// <summary>
-        /// Tick when CollionStayed last called. This only has value if using prediction.
-        /// </summary>
-        private uint _collisionStayedTick;
-        /// <summary>
-        /// Local client objects this object is currently colliding with.
-        /// </summary>
-        private HashSet<GameObject> _localClientCollidedObjects = new HashSet<GameObject>();
-#if UNITY_EDITOR
-        /// <summary>
-        /// This is only used to preview smoother data settings.
-        /// </summary>
-        [SerializeField]
-        private AdaptiveInterpolationSmoothingData _preconfiguredSmoothingDataPreview = _mixedSmoothingData;
-#endif
+        private List<NetworkBehaviour> _predictionBehaviours = new();
         #endregion
 
+        private void TimeManager_OnUpdate_Prediction()
+        {
+            if (!_enablePrediction)
+                return;
+
+            if (PredictionSmoother != null)
+                PredictionSmoother.OnUpdate();
+        }
+
+        private void InitializePredictionEarly(NetworkManager manager, bool asServer)
+        {
+            if (!_enablePrediction)
+                return;
+
+            if (!_enableStateForwarding && _networkTransform != null)
+                _networkTransform.ConfigureForPrediction(_predictionType);
+
+            if (asServer)
+                return;
+            else
+                InitializeSmoothers();
+
+            if (_predictionBehaviours.Count > 0)
+            {
+                ChangePredictionSubscriptions(true, manager);
+                foreach (NetworkBehaviour item in _predictionBehaviours)
+                    item.Preinitialize_Prediction(asServer);
+            }
+        }
+
+        private void Deinitialize_Prediction(bool asServer)
+        {
+            if (!_enablePrediction)
+                return;
+
+            DeinitializeSmoothers();
+            /* Only the client needs to unsubscribe from these but
+             * asServer may not invoke as false if the client is suddenly
+             * dropping their connection. */
+            if (_predictionBehaviours.Count > 0)
+            {
+                ChangePredictionSubscriptions(false, NetworkManager);
+                foreach (NetworkBehaviour item in _predictionBehaviours)
+                    item.Deinitialize_Prediction(asServer);
+            }
+        }
+
+        /// <summary>
+        /// Changes subscriptions to use callbacks for prediction.
+        /// </summary>
+        private void ChangePredictionSubscriptions(bool subscribe, NetworkManager manager)
+        {
+            if (manager == null)
+                return;
+
+            if (subscribe)
+            {
+                manager.PredictionManager.OnPreReconcile += PredictionManager_OnPreReconcile;
+                manager.PredictionManager.OnReconcile += PredictionManager_OnReconcile;
+                manager.PredictionManager.OnReplicateReplay += PredictionManager_OnReplicateReplay;
+                manager.PredictionManager.OnPostReplicateReplay += PredictionManager_OnPostReplicateReplay;
+                manager.PredictionManager.OnPostReconcile += PredictionManager_OnPostReconcile;
+                manager.TimeManager.OnPreTick += TimeManager_OnPreTick;
+                manager.TimeManager.OnPostTick += TimeManager_OnPostTick;
+            }
+            else
+            {
+                manager.PredictionManager.OnPreReconcile -= PredictionManager_OnPreReconcile;
+                manager.PredictionManager.OnReconcile -= PredictionManager_OnReconcile;
+                manager.PredictionManager.OnReplicateReplay -= PredictionManager_OnReplicateReplay;
+                manager.PredictionManager.OnPostReplicateReplay -= PredictionManager_OnPostReplicateReplay;
+                manager.PredictionManager.OnPostReconcile -= PredictionManager_OnPostReconcile;
+                manager.TimeManager.OnPreTick -= TimeManager_OnPreTick;
+                manager.TimeManager.OnPostTick -= TimeManager_OnPostTick;
+            }
+        }
+
+        /// <summary>
+        /// Initializes tick smoothing.
+        /// </summary>
         private void InitializeSmoothers()
         {
             bool usesRb = (_predictionType == PredictionType.Rigidbody);
             bool usesRb2d = (_predictionType == PredictionType.Rigidbody2D);
             if (usesRb || usesRb2d)
             {
-                RigidbodyPauser = new RigidbodyPauser();
+                _rigidbodyPauser = ResettableObjectCaches<RigidbodyPauser>.Retrieve();
                 RigidbodyType rbType = (usesRb) ? RigidbodyType.Rigidbody : RigidbodyType.Rigidbody2D;
-                RigidbodyPauser.UpdateRigidbodies(transform, rbType, true, _graphicalObject);
+                _rigidbodyPauser.UpdateRigidbodies(transform, rbType, true);
             }
 
-            //Create SetInterpolation smoother.
-            _ownerSetInterpolationSmoother = new SetInterpolationSmoother();
-            float teleportThreshold = (_enableTeleport) ? _ownerTeleportThreshold : MoveRatesCls.UNSET_VALUE;
-            SetInterpolationSmootherData osd = new SetInterpolationSmootherData()
+            if (_graphicalObject == null)
             {
-                GraphicalObject = _graphicalObject,
-                Interpolation = _ownerInterpolation,
-                SmoothPosition = true,
-                SmoothRotation = true,
-                SmoothScale = true,
-                NetworkObject = this,
-                TeleportThreshold = teleportThreshold,
-            };
-            _ownerSetInterpolationSmoother.InitializeOnce(osd);
-
-            //Spectator.
-            _spectatorSetInterpolationSmoother = new SetInterpolationSmoother();
-            _spectatorSetInterpolationSmoother.InitializeOnce(osd);
-
-            //Create adaptive interpolation smoother if enabled.
-            if (_spectatorAdaptiveInterpolation)
+                NetworkManagerExtensions.Log($"GraphicalObject is null on {gameObject.name}. This may be intentional, and acceptable, if you are smoothing between ticks yourself. Otherwise consider assigning the GraphicalObject field.");
+            }
+            else
             {
-                _spectatorAdaptiveInterpolationSmoother = new AdaptiveInterpolationSmoother();
-                //Smoothing values.
-                AdaptiveInterpolationSmoothingData aisd = GetAdaptiveSmoothingData(_adaptiveSmoothingType);
-                //Other details.
-                aisd.GraphicalObject = _graphicalObject;
-                aisd.SmoothPosition = true;
-                aisd.SmoothRotation = true;
-                aisd.SmoothScale = true;
-                aisd.NetworkObject = this;
-                aisd.TeleportThreshold = teleportThreshold;
-                _spectatorAdaptiveInterpolationSmoother.Initialize(aisd);
+                if (PredictionSmoother == null)
+                    PredictionSmoother = ResettableObjectCaches<ChildTransformTickSmoother>.Retrieve();
+                InitializeTickSmoother();
             }
         }
 
-        private void Prediction_Update()
+        /// <summary>
+        /// Initializes the tick smoother.
+        /// </summary>
+        private void InitializeTickSmoother()
         {
-            if (!_enablePrediction)
+            if (PredictionSmoother == null)
+                return;
+            float teleportT = (_enableTeleport) ? _teleportThreshold : MoveRatesCls.UNSET_VALUE;
+            PredictionSmoother.InitializeNetworked(this, _graphicalObject, _detachGraphicalObject, teleportT, (float)TimeManager.TickDelta, _ownerInterpolation, _ownerSmoothedProperties, _spectatorInterpolation, _spectatorSmoothedProperties, _adaptiveInterpolation);
+        }
+
+        /// <summary>
+        /// Initializes tick smoothing.
+        /// </summary>
+        private void DeinitializeSmoothers()
+        {
+            if (PredictionSmoother != null)
+            {
+                PredictionSmoother.Deinitialize();
+                ResettableObjectCaches<ChildTransformTickSmoother>.Store(PredictionSmoother);
+                PredictionSmoother = null;
+                ResettableObjectCaches<RigidbodyPauser>.StoreAndDefault(ref _rigidbodyPauser);
+            }
+        }
+
+        private void InvokeStartCallbacks_Prediction(bool asServer)
+        {
+            if (_predictionBehaviours.Count == 0)
                 return;
 
-            _ownerSetInterpolationSmoother.Update();
-            if (IsHost)
-                _spectatorSetInterpolationSmoother.Update();
-            else
-                _spectatorAdaptiveInterpolationSmoother?.Update();
+            if (!asServer)
+            {
+                TimeManager.OnUpdate += TimeManager_Update;
+                if (PredictionSmoother != null)
+                    PredictionSmoother.OnStartClient();
+            }
+        }
+
+        private void InvokeStopCallbacks_Prediction(bool asServer)
+        {
+            if (_predictionBehaviours.Count == 0)
+                return;
+
+            if (!asServer)
+            {
+                TimeManager.OnUpdate -= TimeManager_Update;
+                if (PredictionSmoother != null)
+                    PredictionSmoother.OnStopClient();
+            }
         }
 
         private void TimeManager_OnPreTick()
         {
-            //Do not need to check use prediction because this method only fires if prediction is on for this object.
-            _ownerSetInterpolationSmoother.OnPreTick();
-            if (IsHost)
-                _spectatorSetInterpolationSmoother.OnPreTick();
-            else
-                _spectatorAdaptiveInterpolationSmoother?.OnPreTick();
+            if (PredictionSmoother != null)
+                PredictionSmoother.OnPreTick();
         }
+
+        private void PredictionManager_OnPostReplicateReplay(uint clientTick, uint serverTick)
+        {
+            if (PredictionSmoother != null)
+                PredictionSmoother.OnPostReplay(clientTick);
+        }
+
         private void TimeManager_OnPostTick()
         {
-            //Do not need to check use prediction because this method only fires if prediction is on for this object.
-            _ownerSetInterpolationSmoother.OnPostTick();
-            if (IsHost)
-                _spectatorSetInterpolationSmoother.OnPostTick();
-            else
-                _spectatorAdaptiveInterpolationSmoother?.OnPostTick();
-
-            TrySetCollisionExited();
+            if (PredictionSmoother != null)
+                PredictionSmoother.OnPostTick(NetworkManager.TimeManager.LocalTick);
         }
 
-        private void Prediction_Preinitialize(NetworkManager manager, bool asServer)
+        private void PredictionManager_OnPreReconcile(uint clientTick, uint serverTick)
         {
-            if (!_enablePrediction)
-                return;
-
-            InitializeSmoothers();
-
-            if (asServer)
-                return;
-
-            if (_predictionBehaviours.Count > 0)
-            {
-                manager.PredictionManager.OnPreReconcile += PredictionManager_OnPreReconcile;
-                manager.PredictionManager.OnReplicateReplay += PredictionManager_OnReplicateReplay;
-                manager.PredictionManager.OnPostReconcile += PredictionManager_OnPostReconcile;
-                if (_spectatorAdaptiveInterpolationSmoother != null)
-                {
-                    manager.PredictionManager.OnPreReplicateReplay += PredictionManager_OnPreReplicateReplay;
-                    manager.PredictionManager.OnPostReplicateReplay += PredictionManager_OnPostReplicateReplay;
-                }
-                manager.TimeManager.OnPreTick += TimeManager_OnPreTick;
-                manager.TimeManager.OnPostTick += TimeManager_OnPostTick;
-            }
+            if (PredictionSmoother != null)
+                PredictionSmoother.OnPreReconcile();
         }
 
-        private void Prediction_Deinitialize(bool asServer)
+        private void PredictionManager_OnReconcile(uint clientReconcileTick, uint serverReconcileTick)
         {
-            if (!_enablePrediction)
-                return;
-
-            /* Only the client needs to unsubscribe from these but
-             * asServer may not invoke as false if the client is suddenly
-             * dropping their connection. */
-            if (_predictionBehaviours.Count > 0 && NetworkManager != null)
-            {
-                NetworkManager.PredictionManager.OnPreReconcile -= PredictionManager_OnPreReconcile;
-                NetworkManager.PredictionManager.OnReplicateReplay -= PredictionManager_OnReplicateReplay;
-                NetworkManager.PredictionManager.OnPostReconcile -= PredictionManager_OnPostReconcile;
-                if (_spectatorAdaptiveInterpolationSmoother != null)
-                {
-                    NetworkManager.PredictionManager.OnPreReplicateReplay -= PredictionManager_OnPreReplicateReplay;
-                    NetworkManager.PredictionManager.OnPostReplicateReplay -= PredictionManager_OnPostReplicateReplay;
-                }
-                NetworkManager.TimeManager.OnPreTick -= TimeManager_OnPreTick;
-                NetworkManager.TimeManager.OnPostTick -= TimeManager_OnPostTick;
-            }
-        }
-
-        private void PredictionManager_OnPreReconcile(uint clientReconcileTick, uint serverReconcileTick)
-        {
+            /* Tell all prediction behaviours to set/validate their
+             * reconcile data now. This will use reconciles from the server
+             * whenever possible, and local reconciles if a server reconcile
+             * is not available. */
             for (int i = 0; i < _predictionBehaviours.Count; i++)
                 _predictionBehaviours[i].Reconcile_Client_Start();
+
+            /* If still not reconciling then pause rigidbody.
+             * This shouldn't happen unless the user is not calling
+             * reconcile at all. */
+            if (!IsObjectReconciling)
+            {
+                if (_rigidbodyPauser != null)
+                    _rigidbodyPauser.Pause();
+            }
         }
 
         private void PredictionManager_OnPostReconcile(uint clientReconcileTick, uint serverReconcileTick)
         {
-            _spectatorAdaptiveInterpolationSmoother?.OnPostReconcile(clientReconcileTick, serverReconcileTick);
-
             for (int i = 0; i < _predictionBehaviours.Count; i++)
                 _predictionBehaviours[i].Reconcile_Client_End();
 
@@ -249,146 +368,16 @@ namespace FishNet.Object
              * than per NB, where the pausing occurs, because once here
              * the entire object is out of the replay cycle so there's
              * no reason to try and unpause per NB. */
-            RigidbodyPauser?.Unpause();
+            if (_rigidbodyPauser != null)
+                _rigidbodyPauser.Unpause();
+            IsObjectReconciling = false;
         }
-
 
         private void PredictionManager_OnReplicateReplay(uint clientTick, uint serverTick)
         {
             uint replayTick = (IsOwner) ? clientTick : serverTick;
             for (int i = 0; i < _predictionBehaviours.Count; i++)
                 _predictionBehaviours[i].Replicate_Replay_Start(replayTick);
-        }
-
-        private void PredictionManager_OnPreReplicateReplay(uint clientTick, uint serverTick)
-        {
-            /* Adaptive smoother uses localTick (clientTick) to track graphical datas.
-             * There's no need to use serverTick since the only purpose of adaptiveSmoother
-             * is to smooth graphic changes, not update the transform itself. */
-            if (!IsHost)
-                _spectatorAdaptiveInterpolationSmoother?.OnPreReplicateReplay(clientTick, serverTick);
-        }
-
-        private void PredictionManager_OnPostReplicateReplay(uint clientTick, uint serverTick)
-        {
-            /* Adaptive smoother uses localTick (clientTick) to track graphical datas.
-            * There's no need to use serverTick since the only purpose of adaptiveSmoother
-            * is to smooth graphic changes, not update the transform itself. */
-            if (!IsHost)
-                _spectatorAdaptiveInterpolationSmoother?.OnPostReplicateReplay(clientTick, serverTick);
-        }
-
-        /// <summary>
-        /// Returns if this object is colliding with any local client objects.
-        /// </summary>
-        /// <returns></returns>
-        internal bool CollidingWithLocalClient()
-        {
-            /* If it's been more than 1 tick since collision stayed
-             * then do not consider as collided. */
-            return (TimeManager.LocalTick - _collisionStayedTick) <= 1;
-        }
-
-        /// <summary>
-        /// Called when colliding with another object.
-        /// </summary>
-        private void OnCollisionEnter(Collision collision)
-        {
-            if (!IsClientInitialized)
-                return;
-            if (_predictionType != PredictionType.Rigidbody)
-                return;
-
-            GameObject go = collision.gameObject;
-            if (CollisionEnteredLocalClientObject(go))
-                CollisionEntered(go);
-        }
-
-        /// <summary>
-        /// Called when collision has entered a local clients object.
-        /// </summary>
-        private void CollisionEntered(GameObject go)
-        {
-            _collisionStayedTick = TimeManager.LocalTick;
-            _localClientCollidedObjects.Add(go);
-        }
-
-        /// <summary>
-        /// Called when colliding with another object.
-        /// </summary>
-        private void OnCollisionEnter2D(Collision2D collision)
-        {
-            if (!IsClientInitialized)
-                return;
-            if (_predictionType != PredictionType.Rigidbody2D)
-                return;
-
-            GameObject go = collision.gameObject;
-            if (CollisionEnteredLocalClientObject(go))
-                CollisionEntered(go);
-        }
-
-
-        /// <summary>
-        /// Called when staying in collision with another object.
-        /// </summary>
-        private void OnCollisionStay(Collision collision)
-        {
-            if (!IsClientInitialized)
-                return;
-            if (_predictionType != PredictionType.Rigidbody)
-                return;
-
-            if (_localClientCollidedObjects.Contains(collision.gameObject))
-                _collisionStayedTick = TimeManager.LocalTick;
-        }
-        /// <summary>
-        /// Called when staying in collision with another object.
-        /// </summary>
-        private void OnCollisionStay2D(Collision2D collision)
-        {
-            if (!IsClientInitialized)
-                return;
-            if (_predictionType != PredictionType.Rigidbody2D)
-                return;
-
-            if (_localClientCollidedObjects.Contains(collision.gameObject))
-                _collisionStayedTick = TimeManager.LocalTick;
-        }
-
-        /// <summary>
-        /// Called when a collision occurs and the smoothing type must perform operations.
-        /// </summary>
-        private bool CollisionEnteredLocalClientObject(GameObject go)
-        {
-            if (go.TryGetComponent<NetworkObject>(out NetworkObject nob))
-                return nob.Owner.IsLocalClient;
-
-            //Fall through.
-            return false;
-        }
-
-
-        /// <summary>
-        /// Called when collision has exited a local clients object.
-        /// </summary>
-        private void TrySetCollisionExited()
-        {
-            /* If this object is no longer
-             * colliding with local client objects
-             * then unset collision.
-             * This is done here instead of using
-             * OnCollisionExit because often collisionexit
-             * will be missed due to ignored ticks. 
-             * While not ignoring ticks is always an option
-             * its not ideal because ignoring ticks helps
-            * prevent over predicting. */
-            TimeManager tm = TimeManager;
-            if (tm == null || (_collisionStayedTick != 0 && (tm.LocalTick != _collisionStayedTick)))
-            {
-                _localClientCollidedObjects.Clear();
-                _collisionStayedTick = 0;
-            }
         }
 
         /// <summary>
@@ -401,52 +390,71 @@ namespace FishNet.Object
         }
 
         /// <summary>
-        /// Resets replicate tick and unordered replicate tick.
+        /// Clears replication queue inserting them into the past replicates history when possible.
+        /// This should only be called when client only.
         /// </summary>
-        internal void ResetReplicateTick()
+        internal void EmptyReplicatesQueueIntoHistory()
         {
-            ReplicateTick.Reset();
-            LastUnorderedReplicateTick = 0;
+            for (int i = 0; i < _predictionBehaviours.Count; i++)
+                _predictionBehaviours[i].EmptyReplicatesQueueIntoHistory_Start();
         }
 
         /// <summary>
-        /// Sets the last tick this NetworkBehaviour replicated with.
+        /// Sets the last tick a NetworkBehaviour replicated with.
         /// </summary>
-        internal void SetReplicateTick(uint value, bool setUnordered)
+        /// <param name="setUnordered">True to set unordered value, false to set ordered.</param>
+        internal void SetReplicateTick(uint value, bool createdReplicate)
         {
-            if (setUnordered)
-                LastUnorderedReplicateTick = value;
-
-            ReplicateTick.Update(NetworkManager.TimeManager, value, EstimatedTick.OldTickOption.Discard);
-            Owner.ReplicateTick.Update(NetworkManager.TimeManager, value, EstimatedTick.OldTickOption.Discard);
+            if (createdReplicate && Owner.IsValid)
+                Owner.ReplicateTick.Update(NetworkManager.TimeManager, value, EstimatedTick.OldTickOption.Discard);
         }
 
         /// <summary>
-        /// Returns which smoothing data to use.
+        /// ResetState for prediction values.
         /// </summary>
-        private AdaptiveInterpolationSmoothingData GetAdaptiveSmoothingData(AdaptiveSmoothingType ast)
-        {
-            if (_adaptiveSmoothingType == AdaptiveSmoothingType.Custom)
-                return _customSmoothingData;
-            else if (_adaptiveSmoothingType == AdaptiveSmoothingType.Accuracy)
-                return _accurateSmoothingData;
-            else if (_adaptiveSmoothingType == AdaptiveSmoothingType.Mixed)
-                return _mixedSmoothingData;
-            else if (_adaptiveSmoothingType == AdaptiveSmoothingType.Gradual)
-                return _gradualSmoothingData;
-
-            //Fall through.
-            NetworkManager.LogError($"AdaptiveSmoothingType {ast} is unhandled.");
-            return _mixedSmoothingData;
-        }
-
-#if UNITY_EDITOR
-        private void Prediction_OnValidate()
-        {
-            _preconfiguredSmoothingDataPreview = GetAdaptiveSmoothingData(_adaptiveSmoothingType);
-        }
-#endif
+        private void ResetState_Prediction(bool asServer) { }
     }
-#endif
-}
 
+    /// <summary>
+    /// Place this component on your NetworkManager object to remove ownership of objects for a disconnecting client.
+    /// This prevents any owned object from being despawned when the owner disconnects.
+    /// </summary>
+    public class GlobalPreserveOwnedObjects : MonoBehaviour
+    {
+        private void Awake()
+        {
+            ServerManager sm = GetComponent<ServerManager>();
+            sm.Objects.OnPreDestroyClientObjects += Objects_OnPreDestroyClientObjects;
+        }
+
+        protected virtual void Objects_OnPreDestroyClientObjects(NetworkConnection conn)
+        {
+            foreach (NetworkObject networkObject in conn.Objects)
+                networkObject.RemoveOwnership();
+        }
+    }
+
+    /// <summary>
+    /// Place this component on NetworkObjects you wish to remove ownership on for a disconnecting owner.
+    /// This prevents the object from being despawned when the owner disconnects.
+    /// </summary>
+    public class NetworkPreserveOwnedObjects : NetworkBehaviour
+    {
+        public override void OnStartServer()
+        {
+            ServerManager.Objects.OnPreDestroyClientObjects += OnPreDestroyClientObjects;
+        }
+
+        public override void OnStopServer()
+        {
+            if (ServerManager != null)
+                ServerManager.Objects.OnPreDestroyClientObjects -= OnPreDestroyClientObjects;
+        }
+
+        private void OnPreDestroyClientObjects(NetworkConnection conn)
+        {
+            if (conn == Owner)
+                RemoveOwnership();
+        }
+    }
+}

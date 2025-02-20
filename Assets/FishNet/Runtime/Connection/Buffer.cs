@@ -75,7 +75,7 @@ namespace FishNet.Connection
             if (!HasData)
             {
                 int pos = 0;
-                WriterExtensions.WriteUInt32(Data, tick, ref pos);
+                Writer.WriteUInt32Unpacked(Data, tick, ref pos);
             }
 
             Buffer.BlockCopy(segment.Array, segment.Offset, Data, Length, segment.Count);
@@ -104,7 +104,7 @@ namespace FishNet.Connection
         /// <summary>
         /// All buffers written. Collection is not cleared when reset but rather the index in which to write is.
         /// </summary>
-        private List<ByteBuffer> _buffers = new List<ByteBuffer>();
+        private List<ByteBuffer> _buffers = new();
         /// <summary>
         /// Buffer which is being written to.
         /// </summary>
@@ -139,7 +139,7 @@ namespace FishNet.Connection
             _isSendLastBundle = (orderType == DataOrderType.Last);
             //If this is not the send last packetbundle then make a new one.
             if (!_isSendLastBundle)
-                _sendLastBundle = new PacketBundle(manager, mtu, reserve, DataOrderType.Last);
+                _sendLastBundle = new(manager, mtu, reserve, DataOrderType.Last);
 
             _networkManager = manager;
             _maximumTransportUnit = mtu;
@@ -147,7 +147,7 @@ namespace FishNet.Connection
              * Modify reserve after making sendLast bundle
              * so that the wrong reserve is not passed into
              * the sendLast bundle. */
-            reserve += TransportManager.TICK_BYTES;
+            reserve += TransportManager.UNPACKED_TICK_LENGTH;
             _reserve = reserve;
             //Add buffer requires the right reserve so call after setting.
             AddBuffer();
@@ -168,7 +168,7 @@ namespace FishNet.Connection
         /// </summary>
         private ByteBuffer AddBuffer()
         {
-            ByteBuffer ba = new ByteBuffer(_maximumTransportUnit, _reserve);
+            ByteBuffer ba = new(_maximumTransportUnit, _reserve);
             _buffers.Add(ba);
             return ba;
         }

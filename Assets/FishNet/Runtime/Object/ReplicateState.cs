@@ -1,4 +1,4 @@
-﻿using FishNet.Utility.Constant;
+﻿using FishNet.Utility;
 using System.Runtime.CompilerServices;
 
 [assembly: InternalsVisibleTo(UtilityConstants.CODEGEN_ASSEMBLY_NAME)]
@@ -13,44 +13,71 @@ namespace FishNet.Object
         /// </summary>
         Invalid = 0,
         /// <summary>
-        /// Data is user made, such if it were created within OnTick.
-        /// This occurs when a replicate is called from user code.
+        /// Value is seen on server and clients.
+        /// Client or server has data on the object for the tick.
+        /// Clients will only see this value on spectated objects when PredictionManager is using Appended state order.
         /// </summary>
-        UserCreated = 1,
+        CurrentCreated = 1,
         /// <summary>
-        /// No data was made from the user; default data is used with an estimated tick.
-        /// This occurs on non-owned objects or server when a replicate is called from user code, and there are no datas enqeued.
+        /// Value is only seen on server when they do not own the object.
+        /// Server does not have data on this non-owned object for the tick but expected to, such as a state should have arrived but did not.
         /// </summary>
-        Predicted = 2,
+        [System.Obsolete("This is currently not used but may be in a later release. Please read summary for value.")]
+        CurrentPredicted = 2,
         /// <summary>
-        /// Data is user made, such if it were created within OnTick.
-        /// This occurs when a replicate is replaying past datas, triggered by a reconcile. 
+        /// Value is only seen on clients when they do not own the object.
+        /// Client does not have data for the tick but expected to, such as a state should have arrived but did not.
+        /// Client is currently reconciling.
         /// </summary>
-        ReplayedUserCreated = 3,
+        [System.Obsolete("This is currently not used but may be in a later release. Please read summary for value.")]
+        ReplayedPredicted = 3,
         /// <summary>
-        /// No data was made from the user; default data is used with an estimated tick.
-        /// This occurs when a replicate would be replaying past datas, triggered by a reconcile, but there is no user created data for the tick.
+        /// Value is only seen on clients.
+        /// Client has data on the object for the tick.
+        /// Client is currently reconciling.
         /// </summary>
-        ReplayedPredicted = 4,
+        ReplayedCreated = 4,
+        /// <summary>
+        /// Value is only seen on clients when they do not own the object.
+        /// Tick is in the future and data cannot yet be known.
+        /// This can be used to exit replicate early to not process actions, or create actions based on previous datas.
+        /// </summary>
+        CurrentFuture = 5,
+        /// <summary>
+        /// Value is only seen on clients when they do not own the object.
+        /// Tick is in the future and data cannot yet be known.
+        /// Client is currently reconciling.
+        /// This can be used to exit replicate early to not process actions, or create actions based on previous datas.
+        /// </summary>
+        ReplayedFuture = 6,
     }
 
     public static class ReplicateStateExtensions
     {
         /// <summary>
         /// Returns if value is valid.
+        /// This should never be false.
         /// </summary>
         public static bool IsValid(this ReplicateState value) => (value != ReplicateState.Invalid);
         /// <summary>
         /// Returns if value is replayed.
         /// </summary>
-        public static bool IsReplayed(this ReplicateState value) => (value == ReplicateState.ReplayedPredicted || value == ReplicateState.ReplayedUserCreated);
+#pragma warning disable CS0618 // Type or member is obsolete
+        public static bool IsReplayed(this ReplicateState value) => (value == ReplicateState.ReplayedPredicted || value == ReplicateState.ReplayedCreated || value == ReplicateState.ReplayedFuture);
+#pragma warning restore CS0618 // Type or member is obsolete
         /// <summary>
         /// Returns if value is user created.
         /// </summary>
-        public static bool IsUserCreated(this ReplicateState value) => (value == ReplicateState.UserCreated || value == ReplicateState.ReplayedUserCreated);
+        public static bool IsCreated(this ReplicateState value) => (value == ReplicateState.CurrentCreated || value == ReplicateState.ReplayedCreated);
         /// <summary>
         /// Returns if value is predicted.
         /// </summary>
-        public static bool IsPredicted(this ReplicateState value) => !value.IsUserCreated();
+#pragma warning disable CS0618 // Type or member is obsolete
+        public static bool IsPredicted(this ReplicateState value) => (value == ReplicateState.ReplayedPredicted);
+#pragma warning restore CS0618 // Type or member is obsolete
+        /// <summary>
+        /// Returns if value is in the future.
+        /// </summary>
+        public static bool IsFuture(this ReplicateState value) => (value == ReplicateState.CurrentFuture || value == ReplicateState.ReplayedFuture);
     }
 }

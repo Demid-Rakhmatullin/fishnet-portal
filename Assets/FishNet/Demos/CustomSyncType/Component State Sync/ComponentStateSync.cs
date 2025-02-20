@@ -1,16 +1,13 @@
 ﻿using FishNet.Documenting;
-using FishNet.Managing.Logging;
 using FishNet.Object.Synchronizing;
 using FishNet.Object.Synchronizing.Internal;
 using FishNet.Serializing;
-using System.Collections.Generic;
 using System.Runtime.CompilerServices;
+using FishNet.Managing;
 using UnityEngine;
 
 namespace FishNet.Example.ComponentStateSync
 {
-
-
     /// <summary>
     /// It's very important to exclude this from codegen.
     /// However, whichever value you are synchronizing must not be excluded. This is why the value is outside the StructySync class.
@@ -30,10 +27,12 @@ namespace FishNet.Example.ComponentStateSync
         /// Component to state sync.
         /// </summary>
         public T Component { get; private set; }
+
         /// <summary>
         /// Delegate signature for when the component changes.
         /// </summary>
         public delegate void StateChanged(T component, bool prevState, bool nextState, bool asServer);
+
         /// <summary>
         /// Called when the component state changes.
         /// </summary>
@@ -59,7 +58,7 @@ namespace FishNet.Example.ComponentStateSync
                 return;
 
             if (Component == null)
-                NetworkManager.LogError($"State cannot be changed as Initialize has not been called with a valid component.");
+                base.NetworkManager.LogError($"State cannot be changed as Initialize has not been called with a valid component.");
 
             //If hasn't changed then ignore.
             bool prev = GetState();
@@ -85,10 +84,10 @@ namespace FishNet.Example.ComponentStateSync
         /// </summary>
         private void AddOperation(T component, bool prev, bool next)
         {
-            if (!base.IsRegistered)
+            if (!base.IsInitialized)
                 return;
 
-            if (base.NetworkManager != null && !base.NetworkBehaviour.IsServer)
+            if (base.NetworkManager != null && !base.NetworkBehaviour.IsServerStarted)
             {
                 NetworkManager.LogWarning($"Cannot complete operation as server when server is not active.");
                 return;
@@ -100,11 +99,12 @@ namespace FishNet.Example.ComponentStateSync
             bool asServer = true;
             OnChange?.Invoke(component, prev, next, asServer);
         }
+
         /// <summary>
         /// Writes all changed values.
         /// </summary>
         ///<param name="resetSyncTick">True to set the next time data may sync.</param>
-        public override void WriteDelta(PooledWriter writer, bool resetSyncTick = true)
+        protected internal override void WriteDelta(PooledWriter writer, bool resetSyncTick = true)
         {
             base.WriteDelta(writer, resetSyncTick);
             writer.WriteBoolean(Component.enabled);
@@ -113,7 +113,7 @@ namespace FishNet.Example.ComponentStateSync
         /// <summary>
         /// Writes all values.
         /// </summary>
-        public override void WriteFull(PooledWriter writer)
+        protected internal override void WriteFull(PooledWriter writer)
         {
             /* Always write full for this custom sync type.
              * It would be difficult to know if the
@@ -127,29 +127,28 @@ namespace FishNet.Example.ComponentStateSync
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         [APIExclude]
-        public override void Read(PooledReader reader, bool asServer)
+        protected internal override void Read(PooledReader reader, bool asServer)
         {
-            bool nextValue = reader.ReadBoolean();
-            if (base.NetworkManager == null)
-                return;
-
+            base.SetReadArguments(reader, asServer, out bool newChangeId, out bool _, out bool canModifyValues);
+            
             bool prevValue = GetState();
+            bool nextValue = reader.ReadBoolean();
 
             /* When !asServer don't make changes if server is running.
-            * This is because changes would have already been made on
-            * the server side and doing so again would result in duplicates
-            * and potentially overwrite data not yet sent. */
-            bool asClientAndHost = (!asServer && base.NetworkManager.IsServer);
-            if (!asClientAndHost)
+             * This is because changes would have already been made on
+             * the server side and doing so again would result in duplicates
+             * and potentially overwrite data not yet sent. */
+            if (canModifyValues)
                 Component.enabled = nextValue;
 
-            OnChange?.Invoke(Component, prevValue, nextValue, asServer);
+            if (newChangeId)
+                OnChange?.Invoke(Component, prevValue, nextValue, asServer);
         }
 
         /// <summary>
         /// Return the serialized type.
         /// </summary>
         /// <returns></returns>
-        public object GetSerializedType() => typeof(bool);
+        public object GetSerializedType() => null;
     }
 }

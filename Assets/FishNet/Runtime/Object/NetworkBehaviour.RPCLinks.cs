@@ -3,6 +3,7 @@ using FishNet.Object.Helping;
 using FishNet.Serializing;
 using FishNet.Transporting;
 using System.Collections.Generic;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using UnityEngine;
 
@@ -15,9 +16,16 @@ namespace FishNet.Object
         /// <summary>
         /// Link indexes for RPCs.
         /// </summary>
-        private Dictionary<uint, RpcLinkType> _rpcLinks = new Dictionary<uint, RpcLinkType>();
+        private Dictionary<uint, RpcLinkType> _rpcLinks = new();
         #endregion
 
+        #region Consts.
+        /// <summary>
+        /// Number of bytes written for each RPCLinks.
+        /// </summary>
+        internal const int RPCLINK_RESERVED_BYTES = 2;
+        #endregion
+        
         /// <summary>
         /// Initializes RpcLinks. This will only call once even as host.
         /// </summary>
@@ -33,22 +41,31 @@ namespace FishNet.Object
 
             ServerManager serverManager = NetworkManager.ServerManager;
             //ObserverRpcs.
-            foreach (uint rpcHash in _observersRpcDelegates.Keys)
+            if (_observersRpcDelegates != null)
             {
-                if (!MakeLink(rpcHash, RpcType.Observers))
-                    return;
+                foreach (uint rpcHash in _observersRpcDelegates.Keys)
+                {
+                    if (!MakeLink(rpcHash, RpcType.Observers))
+                        return;
+                }
             }
             //TargetRpcs.
-            foreach (uint rpcHash in _targetRpcDelegates.Keys)
+            if (_targetRpcDelegates != null)
             {
-                if (!MakeLink(rpcHash, RpcType.Target))
-                    return;
+                foreach (uint rpcHash in _targetRpcDelegates.Keys)
+                {
+                    if (!MakeLink(rpcHash, RpcType.Target))
+                        return;
+                }
             }
             //ReconcileRpcs.
-            foreach (uint rpcHash in _reconcileRpcDelegates.Keys)
+            if (_reconcileRpcDelegates != null)
             {
-                if (!MakeLink(rpcHash, RpcType.Reconcile))
-                    return;
+                foreach (uint rpcHash in _reconcileRpcDelegates.Keys)
+                {
+                    if (!MakeLink(rpcHash, RpcType.Reconcile))
+                        return;
+                }
             }
 
             /* Tries to make a link and returns if
@@ -58,7 +75,7 @@ namespace FishNet.Object
             {
                 if (serverManager.GetRpcLink(out ushort linkIndex))
                 {
-                    _rpcLinks[rpcHash] = new RpcLinkType(linkIndex, rpcType);
+                    _rpcLinks[rpcHash] = new(linkIndex, rpcType);
                     return true;
                 }
                 else
@@ -84,7 +101,7 @@ namespace FishNet.Object
         /// <summary>
         /// Creates a PooledWriter and writes the header for a rpc.
         /// </summary>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        
         private PooledWriter CreateLinkedRpc(RpcLinkType link, PooledWriter methodWriter, Channel channel)
         {
             int rpcHeaderBufferLength = GetEstimatedRpcHeaderLength();
@@ -118,19 +135,22 @@ namespace FishNet.Object
         /// </summary>
         internal void WriteRpcLinks(Writer writer)
         {
-            PooledWriter rpcLinkWriter = WriterPool.Retrieve();
+            int rpcLinksCount = _rpcLinks.Count;
+            if (rpcLinksCount == 0)
+                return;
+
+            writer.WriteNetworkBehaviourId(this);
+            writer.WriteUInt16((ushort)rpcLinksCount);
+            
             foreach (KeyValuePair<uint, RpcLinkType> item in _rpcLinks)
             {
                 //RpcLink index.
-                rpcLinkWriter.WriteUInt16(item.Value.LinkIndex);
+                writer.WriteUInt16Unpacked(item.Value.LinkIndex);
                 //Hash.
-                rpcLinkWriter.WriteUInt16((ushort)item.Key);
+                writer.WriteUInt16Unpacked((ushort)item.Key);
                 //True/false if observersRpc.
-                rpcLinkWriter.WriteByte((byte)item.Value.RpcType);
+                writer.WriteUInt8Unpacked((byte)item.Value.RpcType);
             }
-
-            writer.WriteBytesAndSize(rpcLinkWriter.GetBuffer(), 0, rpcLinkWriter.Length);
-            rpcLinkWriter.Store();
         }
     }
 }

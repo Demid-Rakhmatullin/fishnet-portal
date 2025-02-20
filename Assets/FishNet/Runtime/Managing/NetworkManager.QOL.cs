@@ -11,6 +11,47 @@ namespace FishNet.Managing
 {
     public partial class NetworkManager : MonoBehaviour
     {
+        #region Public.
+        #region Obsoletes
+        [Obsolete("Use IsClientOnlyStarted. Note the difference between IsClientOnlyInitialized and IsClientOnlyStarted.")]
+        public bool IsClientOnly => IsClientOnlyStarted;
+        [Obsolete("Use IsServerOnlyStarted. Note the difference between IsServerOnlyInitialized and IsServerOnlyStarted.")]
+        public bool IsServerOnly => IsServerOnlyStarted;
+        [Obsolete("Use IsHostStarted. Note the difference between IsHostInitialized and IsHostStarted.")]
+        public bool IsHost => IsHostStarted;
+        [Obsolete("Use IsClientStarted. Note the difference between IsClientInitialized and IsClientStarted.")]
+        public bool IsClient => IsClientStarted;
+        [Obsolete("Use IsServerStarted. Note the difference between IsServerInitialized and IsServerStarted.")]
+        public bool IsServer => IsServerStarted;
+        #endregion
+
+        /// <summary>
+        /// True if server is started.
+        /// </summary>
+        public bool IsServerStarted => ServerManager.Started;
+        /// <summary>
+        /// True if only the server is started.
+        /// </summary>
+        public bool IsServerOnlyStarted => (IsServerStarted && !IsClientStarted);
+        /// <summary>
+        /// True if the client is started and authenticated.
+        /// </summary>
+        public bool IsClientStarted => (ClientManager.Started && ClientManager.Connection.IsAuthenticated);
+        /// <summary>
+        /// True if only the client is started and authenticated.
+        /// </summary>
+        public bool IsClientOnlyStarted => (!IsServerStarted && IsClientStarted);
+        /// <summary>
+        /// True if client and server are started.
+        /// </summary>
+        public bool IsHostStarted => (IsServerStarted && IsClientStarted);
+        /// <summary>
+        /// True if client nor server are started.
+        /// </summary>
+        public bool IsOffline => (!IsServerStarted && !IsClientStarted);
+
+        #endregion
+
         #region Serialized.
         /// <summary>
         /// 
@@ -25,7 +66,7 @@ namespace FishNet.Managing
         /// <summary>
         /// 
         /// </summary>
-        private Dictionary<ushort, PrefabObjects> _runtimeSpawnablePrefabs = new Dictionary<ushort, PrefabObjects>();
+        private Dictionary<ushort, PrefabObjects> _runtimeSpawnablePrefabs = new();
         /// <summary>
         /// Collection to use for spawnable objects added at runtime, such as addressables.
         /// </summary>
@@ -36,11 +77,11 @@ namespace FishNet.Managing
         /// <summary>
         /// Delegates waiting to be invoked when a component is registered.
         /// </summary>
-        private Dictionary<string, List<Action<UnityComponent>>> _pendingInvokes = new Dictionary<string, List<Action<UnityComponent>>>();
+        private Dictionary<string, List<Action<UnityComponent>>> _pendingInvokes = new();
         /// <summary>
         /// Currently registered components.
         /// </summary>
-        private Dictionary<string, UnityComponent> _registeredComponents = new Dictionary<string, UnityComponent>();
+        private Dictionary<string, UnityComponent> _registeredComponents = new();
         #endregion
 
         /// <summary>
@@ -56,7 +97,7 @@ namespace FishNet.Managing
             {
                 if (createIfMissing)
                 {
-                    LogError($"SpawnableCollectionId cannot be 0 when create missing is true.");
+                    InternalLogError($"SpawnableCollectionId cannot be 0 when create missing is true.");
                     return null;
                 }
                 else
@@ -133,13 +174,13 @@ namespace FishNet.Managing
         {
             T result;
             //If not found yet make a pending invoke.
-            if (!TryGetInstance<T>(out result))
+            if (!TryGetInstance(out result))
             {
                 string tName = GetInstanceName<T>();
                 List<Action<UnityComponent>> handlers;
                 if (!_pendingInvokes.TryGetValue(tName, out handlers))
                 {
-                    handlers = new List<Action<UnityComponent>>();
+                    handlers = new();
                     _pendingInvokes[tName] = handlers;
                 }
 
@@ -185,27 +226,12 @@ namespace FishNet.Managing
         public T GetInstance<T>() where T : UnityComponent
         {
             T result;
-            if (TryGetInstance<T>(out result))
+            if (TryGetInstance(out result))
                 return result;
             else
-                LogWarning($"Component {GetInstanceName<T>()} is not registered. To avoid this warning use TryGetInstance(T).");
+                InternalLogWarning($"Component {GetInstanceName<T>()} is not registered. To avoid this warning use TryGetInstance(T).");
 
             return default(T);
-        }
-        /// <summary>
-        /// Returns class of type from registered instances.
-        /// </summary>
-        /// <typeparam name="T">Type to get.</typeparam>
-        /// <param name="warn">True to warn if component is not registered.</param>
-        /// <returns></returns>
-        [Obsolete("Use GetInstance() or TryGetInstance(T).")] //Remove on 2024/01/01.
-        public T GetInstance<T>(bool warn = true) where T : UnityComponent
-        {
-            T result;
-            if (!TryGetInstance<T>(out result) && warn)
-                LogWarning($"Component {GetInstanceName<T>()} is not registered.");
-
-            return result;
         }
         /// <summary>
         /// Returns class of type from registered instances.
@@ -238,7 +264,7 @@ namespace FishNet.Managing
             string tName = GetInstanceName<T>();
             if (_registeredComponents.ContainsKey(tName) && !replace)
             {
-                LogWarning($"Component {tName} is already registered.");
+                InternalLogWarning($"Component {tName} is already registered.");
             }
             else
             {
@@ -263,7 +289,7 @@ namespace FishNet.Managing
         /// <typeparam name="T">Type to register.</typeparam>
         /// <param name="component">Reference of the component being registered.</param>
         /// <returns>True if was able to register, false if an instance is already registered.</returns>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        
         public bool TryRegisterInstance<T>(T component) where T : UnityComponent
         {
             string tName = GetInstanceName<T>();

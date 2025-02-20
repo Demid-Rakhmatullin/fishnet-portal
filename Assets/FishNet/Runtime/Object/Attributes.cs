@@ -48,6 +48,10 @@ namespace FishNet.Object
         /// True to only allow the owning client to call this RPC.
         /// </summary>
         public bool RequireOwnership = true;
+        /// <summary>
+        /// Type of logging to use when the IsServer check fails.
+        /// </summary>
+        public LoggingType Logging = LoggingType.Warning;
     }
 
     /// <summary>
@@ -69,6 +73,10 @@ namespace FishNet.Object
         /// RPC will be sent on the same channel as the original RPC, and immediately before the OnSpawnServer override.
         /// </summary>
         public bool BufferLast = false;
+        /// <summary>
+        /// Type of logging to use when the IsServer check fails.
+        /// </summary>
+        public LoggingType Logging = LoggingType.Warning;
     }
 
     /// <summary>
@@ -86,7 +94,10 @@ namespace FishNet.Object
         /// Use this field with caution as it may create undesired results when set to false.
         /// </summary>
         public bool ValidateTarget = true;
-
+        /// <summary>
+        /// Type of logging to use when the IsServer check fails.
+        /// </summary>
+        public LoggingType Logging = LoggingType.Warning;
     }
 
     /// <summary>
@@ -100,6 +111,10 @@ namespace FishNet.Object
         /// Type of logging to use when the IsServer check fails.
         /// </summary>
         public LoggingType Logging = LoggingType.Warning;
+        /// <summary>
+        /// False to prefer using networkObject.IsServer/ClientInitialized. True to use InstanceFinder.IsServer/ClientStarted.
+        /// </summary>
+        public bool UseIsStarted = false;
     }
 
     /// <summary>
@@ -116,6 +131,10 @@ namespace FishNet.Object
         /// True to only allow a client to run the method if they are owner of the object.
         /// </summary>
         public bool RequireOwnership = false;
+        /// <summary>
+        /// False to prefer using networkObject.IsServer/ClientInitialized. True to use InstanceFinder.IsServer/ClientStarted.
+        /// </summary>
+        public bool UseIsStarted = false;
     }
 }
 
@@ -127,6 +146,7 @@ namespace FishNet.Object.Synchronizing
     /// Synchronizes collections or objects from the server to clients. Can be used with custom SyncObjects.
     /// Value must be changed on server.
     /// </summary>
+    [Obsolete("This no longer functions. See console errors and Break Solutions in the documentation for resolution.")]
     [AttributeUsage(AttributeTargets.Field, Inherited = true, AllowMultiple = false)]
     public class SyncObjectAttribute : PropertyAttribute
     {
@@ -153,6 +173,7 @@ namespace FishNet.Object.Synchronizing
     /// Synchronizes a variable from server to clients automatically.
     /// Value must be changed on server.
     /// </summary>
+    [Obsolete("This no longer functions. Use SyncVar<Type> instead. See console errors and Break Solutions in the documentation for resolution.")]
     [AttributeUsage(AttributeTargets.Field, Inherited = true, AllowMultiple = false)]
     public class SyncVarAttribute : PropertyAttribute
     {

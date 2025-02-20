@@ -1,7 +1,5 @@
 ﻿using FishNet.Connection;
-using FishNet.Object;
 using FishNet.Observing;
-using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using UnityEngine;
 
@@ -19,7 +17,7 @@ namespace FishNet.Component.Observing
         /// <param name="connection">Connection which the condition is being checked for.</param>
         /// <param name="currentlyAdded">True if the connection currently has visibility of this object.</param>
         /// <param name="notProcessed">True if the condition was not processed. This can be used to skip processing for performance. While output as true this condition result assumes the previous ConditionMet value.</param>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        
         public override bool ConditionMet(NetworkConnection connection, bool currentlyAdded, out bool notProcessed)
         {
             //If here then checks are being processed.
@@ -33,16 +31,5 @@ namespace FishNet.Component.Observing
         /// </summary>
         /// <returns></returns>
         public override ObserverConditionType GetConditionType() => ObserverConditionType.Timed;
-
-
-        /// <summary>
-        /// Clones referenced ObserverCondition. This must be populated with your conditions settings.
-        /// </summary>
-        /// <returns></returns>
-        public override ObserverCondition Clone()
-        {
-            GridCondition copy = ScriptableObject.CreateInstance<GridCondition>();
-            return copy;
-        }
     }
 }

@@ -3,7 +3,6 @@ using UnityEngine;
 
 namespace FishNet.Demo.HashGrid
 {
-
     public class MoveRandomly : NetworkBehaviour
     {
         //Colors green for client.
@@ -21,7 +20,7 @@ namespace FishNet.Demo.HashGrid
 
         private void Update()
         {
-            if (!base.IsOwner && !base.IsServer)
+            if (!base.HasAuthority)
                 return;
 
             transform.position = Vector3.MoveTowards(transform.position, _goal, (_moveRate * Time.deltaTime));
@@ -30,9 +29,19 @@ namespace FishNet.Demo.HashGrid
         }
 
         public override void OnStartNetwork()
-        {            
+        {
             _start = transform.position;
+            RandomizeGoal();
+        }
 
+        public override void OnStartServer()
+        {
+            if (!base.Owner.IsValid)
+                transform.position = (_start + RandomInsideRange());
+        }
+
+        public override void OnStartClient()
+        {
             if (base.Owner.IsLocalClient)
             {
                 _renderer.material.color = Color.green;
@@ -40,14 +49,26 @@ namespace FishNet.Demo.HashGrid
                 transform.position -= new Vector3(0f, 0f, 1f);
                 Camera c = Camera.main;
                 c.transform.SetParent(transform);
+                c.transform.localScale = Vector3.one;
+                c.transform.localPosition = new(0f, 0f, -5f);
             }
             else
             {
                 _renderer.material.color = Color.gray;
-                transform.position = (_start + RandomInsideRange());
             }
+        }
 
-            RandomizeGoal();
+        public override void OnStopClient()
+        {
+            if (base.IsOwner)
+            {
+                Camera c = Camera.main;
+                if (c != null)
+                {
+                    c.transform.SetParent(null);
+                    c.transform.localScale = Vector3.one;
+                }
+            }
         }
 
         private void RandomizeGoal()
@@ -61,7 +82,5 @@ namespace FishNet.Demo.HashGrid
             goal.z = transform.position.z;
             return goal;
         }
-
     }
-
 }

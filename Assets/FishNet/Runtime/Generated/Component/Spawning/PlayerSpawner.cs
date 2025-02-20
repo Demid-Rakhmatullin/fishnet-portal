@@ -30,6 +30,11 @@ namespace FishNet.Component.Spawning
         [SerializeField]
         private NetworkObject _playerPrefab;
         /// <summary>
+        /// Sets the PlayerPrefab to use.
+        /// </summary>
+        /// <param name="nob"></param>
+        public void SetPlayerPrefab(NetworkObject nob) => _playerPrefab = nob;
+        /// <summary>
         /// True to add player to the active scene when no global scenes are specified through the SceneManager.
         /// </summary>
         [Tooltip("True to add player to the active scene when no global scenes are specified through the SceneManager.")]
@@ -39,7 +44,6 @@ namespace FishNet.Component.Spawning
         /// Areas in which players may spawn.
         /// </summary>
         [Tooltip("Areas in which players may spawn.")]
-        [FormerlySerializedAs("_spawns")]//Remove on 2024/01/01
         public Transform[] Spawns = new Transform[0];
         #endregion
 
@@ -74,7 +78,7 @@ namespace FishNet.Component.Spawning
             _networkManager = InstanceFinder.NetworkManager;
             if (_networkManager == null)
             {
-                Debug.LogWarning($"PlayerSpawner on {gameObject.name} cannot work as NetworkManager wasn't found on this object or within parent objects.");
+                NetworkManagerExtensions.LogWarning($"PlayerSpawner on {gameObject.name} cannot work as NetworkManager wasn't found on this object or within parent objects.");
                 return;
             }
 
@@ -90,7 +94,7 @@ namespace FishNet.Component.Spawning
                 return;
             if (_playerPrefab == null)
             {
-                Debug.LogWarning($"Player prefab is empty and cannot be spawned for connection {conn.ClientId}.");
+                NetworkManagerExtensions.LogWarning($"Player prefab is empty and cannot be spawned for connection {conn.ClientId}.");
                 return;
             }
 

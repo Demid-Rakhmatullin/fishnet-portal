@@ -59,7 +59,7 @@ namespace FishNet.Example.Authenticating
             if (AuthenticateAsHost())
                 return;
 
-            PasswordBroadcast pb = new PasswordBroadcast()
+            PasswordBroadcast pb = new()
             {
                 Password = _password
             };
@@ -73,12 +73,12 @@ namespace FishNet.Example.Authenticating
         /// </summary>
         /// <param name="conn">Connection sending broadcast.</param>
         /// <param name="pb"></param>
-        private void OnPasswordBroadcast(NetworkConnection conn, PasswordBroadcast pb)
+        private void OnPasswordBroadcast(NetworkConnection conn, PasswordBroadcast pb, Channel channel)
         {
             /* If client is already authenticated this could be an attack. Connections
              * are removed when a client disconnects so there is no reason they should
              * already be considered authenticated. */
-            if (conn.Authenticated)
+            if (conn.IsAuthenticated)
             {
                 conn.Disconnect(true);
                 return;
@@ -96,7 +96,7 @@ namespace FishNet.Example.Authenticating
         /// Received on client after server sends an authentication response.
         /// </summary>
         /// <param name="rb"></param>
-        private void OnResponseBroadcast(ResponseBroadcast rb)
+        private void OnResponseBroadcast(ResponseBroadcast rb, Channel channel)
         {
             string result = (rb.Passed) ? "Authentication complete." : "Authenitcation failed.";
             NetworkManager.Log(result);
@@ -110,7 +110,7 @@ namespace FishNet.Example.Authenticating
             /* Tell client if they authenticated or not. This is
             * entirely optional but does demonstrate that you can send
             * broadcasts to client on pass or fail. */
-            ResponseBroadcast rb = new ResponseBroadcast()
+            ResponseBroadcast rb = new()
             {
                 Passed = authenticated
             };

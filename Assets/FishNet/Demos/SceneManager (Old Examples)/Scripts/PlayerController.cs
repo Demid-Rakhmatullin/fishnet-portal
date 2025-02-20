@@ -15,6 +15,10 @@ namespace FishNet.Example.Scened
         [SerializeField]
         private bool _clientAuth = true;
 
+        private void Awake()
+        {
+            Debug.Log(transform.position);
+        }
         public override void OnStartClient()
         {
             if (base.IsOwner)
@@ -32,7 +36,7 @@ namespace FishNet.Example.Scened
             /* If ground cannot be found for 20 units then bump up 3 units. 
              * This is just to keep player on ground if they fall through
              * when changing scenes.             */
-            if (_clientAuth || (!_clientAuth && base.IsServer))
+            if (_clientAuth || (!_clientAuth && base.IsServerStarted))
             {
                 if (!Physics.Linecast(transform.position + new Vector3(0f, 0.3f, 0f), transform.position - (Vector3.one * 20f)))
                     transform.position += new Vector3(0f, 3f, 0f);
@@ -54,18 +58,18 @@ namespace FishNet.Example.Scened
         {
             float gravity = -10f * Time.deltaTime;
             //If ray hits floor then cancel gravity.
-            Ray ray = new Ray(transform.position + new Vector3(0f, 0.05f, 0f), -Vector3.up);
+            Ray ray = new(transform.position + new Vector3(0f, 0.05f, 0f), -Vector3.up);
             if (Physics.Raycast(ray, 0.1f + -gravity))
                 gravity = 0f;
 
             /* Moving. */
-            Vector3 direction = new Vector3(
+            Vector3 direction = new(
                 0f,
                 gravity,
                 ver * _moveRate * Time.deltaTime);
 
             transform.position += transform.TransformDirection(direction);
-            transform.Rotate(new Vector3(0f, hor * 100f * Time.deltaTime, 0f));
+            transform.Rotate(new(0f, hor * 100f * Time.deltaTime, 0f));
         }
 
     }

@@ -90,7 +90,7 @@ namespace FishNet.Managing.Server
         /// </summary>
         /// <param name="go">GameObject instance to spawn.</param>
         /// <param name="ownerConnection">Connection to give ownership to.</param>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        
         public void Spawn(GameObject go, NetworkConnection ownerConnection = null, UnityEngine.SceneManagement.Scene scene = default)
         {
             if (go == null)
@@ -111,6 +111,11 @@ namespace FishNet.Managing.Server
         /// <param name="ownerConnection">Connection to give ownership to.</param>
         public void Spawn(NetworkObject nob, NetworkConnection ownerConnection = null, UnityEngine.SceneManagement.Scene scene = default)
         {
+            if (!nob.GetIsSpawnable())
+            {
+                NetworkManager.LogWarning($"NetworkObject {nob} cannot be spawned because it is not marked as spawnable.");
+                return;
+            }
             Objects.Spawn(nob, ownerConnection, scene);
         }
 
@@ -119,7 +124,7 @@ namespace FishNet.Managing.Server
         /// </summary>
         /// <param name="go">GameObject instance to despawn.</param>
         /// <param name="cacheOnDespawnOverride">Overrides the default DisableOnDespawn value for this single despawn. Scene objects will never be destroyed.</param>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        
         public void Despawn(GameObject go, DespawnType? despawnType = null)
         {
             if (go == null)
@@ -139,7 +144,7 @@ namespace FishNet.Managing.Server
         /// <param name="despawnType">Despawn override type.</param>
         public void Despawn(NetworkObject networkObject, DespawnType? despawnType = null)
         {
-            DespawnType resolvedDespawnType = (despawnType == null)
+            DespawnType resolvedDespawnType = (!despawnType.HasValue)
                 ? networkObject.GetDefaultDespawnType()
                 : despawnType.Value;
             Objects.Despawn(networkObject, resolvedDespawnType, true);
